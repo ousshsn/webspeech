@@ -1,42 +1,69 @@
-const express = require('express');
+const path = require("path");
+const express = require("express");
+const colors = require("colors");
+const dotenv = require("dotenv");
+const socketio = require("socket.io");
+const dialogflow = require("@google-cloud/dialogflow");
+const uuid = require("uuid");
 const app = express();
 
-app.use(express.static(__dirname + '/views')); // html
-app.use(express.static(__dirname + '/public')); // js, css, images
+dotenv.config({ path: "./config/config.env" });
 
-const server = app.listen(5000);
+app.use(express.static(path.join(__dirname, "views")));
+app.use(express.static(path.join(__dirname, "public")));
 
-const io = require('socket.io')(server);
+const PORT = process.env.PORT || 3000;
 
-io.on('connection', function(socket){
-    console.log('a user connected');
-});
+const server = app.listen(
+    PORT,
+    console.log(
+        `Server is runnig on ${process.env.NODE_ENV} mode at port ${PORT}`.yellow
+            .bold
+    )
+);
 
-const apiai = require('apiai')('57bd500a3ebc824fd8f284ea2347d2751b91811a');
+const io = socketio(server);
+io.on("connection", function (socket) {
+    console.log("a user connected");
 
-io.on('connection', function(socket) {
-    socket.on('chat message', (text) => {
+    socket.on("chat message", (message) => {
+        console.log(message);
 
-        // Get a reply from API.AI
+        const callapibot = async (projectId = process.env.PROJECT_ID) => {
+            try {
+                const sessionId = uuid.v4();
+                const sessionClient = new dialogflow.SessionsClient({
+                    keyFilename: "./WebSpeechAIbot-41194528781e.json",
+                });
+                const sessionPath = sessionClient.projectAgentSessionPath(
+                    projectId,
+                    sessionId
+                );
+                const request = {
+                    session: sessionPath,
+                    queryInput: {
+                        text: {
+                            text: message,
+                            languageCode: "en-US",
+                        },
+                    },
+                };
+                const responses = await sessionClient.detectIntent(request);
 
-        let apiaiReq = apiai.textRequest(text, {
-            sessionId: 108841673844139301901
-        });
+                console.log("Detected intent");
+                const result = responses[0].queryResult.fulfillmentText;
+                socket.emit("bot reply", result);
+                console.log(result);
+                if (result.intent) {
+                    console.log(`  Intent: ${result.intent.displayName}`);
+                } else {
+                    console.log(`  No intent matched.`);
+                }
+            } catch (error) {
+                console.log(error);
+            }
+        };
 
-        apiaiReq.on('response', (response) => {
-            let aiText = response.result.fulfillment.speech;
-            socket.emit('bot reply', aiText);
-        });
-
-        apiaiReq.on('error', (error) => {
-            console.log(error);
-        });
-
-        apiaiReq.end();
-
+        callapibot();
     });
 });
-app.get('/', (req, res) => {
-    res.sendFile('index.html');
-});
-
